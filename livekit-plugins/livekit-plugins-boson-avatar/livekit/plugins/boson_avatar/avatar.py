@@ -122,6 +122,8 @@ class AvatarSession(BaseAvatarSession[Any]):
             conn_options=conn_options,
         )
         self._session_info: AvatarSessionInfo | None = None
+        self._owned_audio_output: DataStreamAudioOutput | None = None
+        self._stateless_room: rtc.Room | None = None
         self._start_called = False
         self._closed = False
         self._close_requested = False
@@ -187,6 +189,9 @@ class AvatarSession(BaseAvatarSession[Any]):
             await super().start(agent_session, room)
             self._tracked_agent_session = agent_session
             agent_session.on("close", self._on_agent_session_close)
+            if self._stateless:
+                self._stateless_room = room
+                room.on("participant_disconnected", self._on_stateless_participant_left)
             started_info: AvatarSessionInfo | None = None
             try:
                 self._create_task = asyncio.create_task(
@@ -233,6 +238,7 @@ class AvatarSession(BaseAvatarSession[Any]):
                     # still buffering speech until the Avatar is ready.
                     wait_remote_track=rtc.TrackKind.KIND_AUDIO,
                 )
+                self._owned_audio_output = audio_output
                 replace_audio_tail = getattr(agent_session.output, "replace_audio_tail", None)
                 if callable(replace_audio_tail):
                     replace_audio_tail(audio_output)
@@ -328,6 +334,7 @@ class AvatarSession(BaseAvatarSession[Any]):
                 self._closed = True
 
     async def _run_shutdown(self) -> None:
+        self._disable_owned_stateless_audio()
         session_info = self._session_info
         if session_info is not None:
             try:
@@ -386,6 +393,30 @@ class AvatarSession(BaseAvatarSession[Any]):
         await self._api.end_session(info.id)
         return True
 
+    def _disable_owned_stateless_audio(self) -> None:
+        # Stop local production before waiting on an unreachable control plane.
+        # Only affect a chain still containing this Avatar's owned output.
+        if (
+            not self._stateless
+            or self._tracked_agent_session is None
+            or self._owned_audio_output is None
+        ):
+            return
+        output = self._tracked_agent_session.output
+        cursor = output.audio
+        for _ in range(32):
+            if cursor is None:
+                return
+            if cursor is self._owned_audio_output:
+                output.set_audio_enabled(False)
+                self._owned_audio_output.clear_buffer()
+                return
+            cursor = cursor.next_in_chain
+
+    def _on_stateless_participant_left(self, participant: rtc.RemoteParticipant) -> None:
+        if participant.identity == self._avatar_identity:
+            self._on_agent_session_close(None)
+
     def _on_agent_session_close(self, _: Any) -> None:
         self._close_requested = True
         if (self._closed and self._session_info is None) or self._agent_close_task is not None:
@@ -412,6 +443,11 @@ class AvatarSession(BaseAvatarSession[Any]):
             )
 
     def _detach_agent_close_listener(self) -> None:
+        if self._stateless_room is not None:
+            self._stateless_room.off(
+                "participant_disconnected", self._on_stateless_participant_left
+            )
+            self._stateless_room = None
         if self._tracked_agent_session is not None:
             self._tracked_agent_session.off("close", self._on_agent_session_close)
             self._tracked_agent_session = None

@@ -21,6 +21,10 @@ redaction, pending stop and unreachable stop closing local media while retaining
 cleanup context. Real media and fault acceptance remain separate ops gates.
 HTTP redirects are disabled so a provider redirect cannot forward a control
 handle to another origin; the same 39 tests plus 38 subtests pass with this guard.
+Follow-up: v2 disables its still-owned audio-output chain and clears buffered
+playout before waiting for DELETE; it does not disable an output replaced by the
+application. Original renderer departure closes the Avatar instead of starting a
+replacement. Tests now total 40 passed plus 38 subtests; Ruff and mypy pass.
 
 Use Boson's Higgs Audio-Driven Avatar as the video output for a LiveKit voice
 agent. This is an Avatar plugin: it composes with your existing voice/LLM

@@ -1,5 +1,6 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -115,6 +116,10 @@ async def test_pending_or_unreachable_stop_still_closes_local_media_and_keeps_co
         )
         info = AvatarSessionInfo(ID, "renderer", HANDLE)
         avatar._session_info = info
+        audio = Mock()
+        output = SimpleNamespace(audio=audio, set_audio_enabled=Mock())
+        avatar._owned_audio_output = audio
+        avatar._tracked_agent_session = SimpleNamespace(output=output, off=Mock())
         stop = AsyncMock(return_value=False)
         if isinstance(outcome, Exception):
             stop.side_effect = outcome
@@ -124,7 +129,29 @@ async def test_pending_or_unreachable_stop_still_closes_local_media_and_keeps_co
         ):
             await avatar.aclose()
             close.assert_awaited_once()
+            output.set_audio_enabled.assert_called_once_with(False)
+            audio.clear_buffer.assert_called_once()
             assert avatar._session_info is info and avatar._closed
         with patch.object(avatar._api, "stop_owned_session", AsyncMock(return_value=True)):
             await avatar.aclose()
             assert avatar._session_info is None
+
+
+@pytest.mark.asyncio
+async def test_original_renderer_departure_closes_without_recreation():
+    from livekit.plugins.boson_avatar.avatar import AvatarSession
+
+    avatar = AvatarSession(
+        avatar_id="builtin_claire",
+        api_key="synthetic",
+        api_url="http://127.0.0.1/v2/avatar/livekit",
+        stateless=True,
+        avatar_participant_identity="renderer",
+    )
+    with patch.object(avatar, "aclose", AsyncMock()) as close:
+        avatar._on_stateless_participant_left(SimpleNamespace(identity="someone-else"))
+        close.assert_not_awaited()
+        avatar._on_stateless_participant_left(SimpleNamespace(identity="renderer"))
+        await avatar._agent_close_task
+        close.assert_awaited_once()
+        assert avatar._close_requested and avatar._create_task is None
