@@ -242,6 +242,7 @@ class BosonAvatarAPI:
                     url,
                     json=json,
                     headers=request_headers,
+                    allow_redirects=False,
                     timeout=aiohttp.ClientTimeout(total=self._conn_options.timeout),
                 ) as response:
                     payload = await _read_payload(response)

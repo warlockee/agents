@@ -81,6 +81,7 @@ async def test_stop_preserves_handle_until_release_or_gone():
     assert await api.stop_owned_session(info) is True
     assert await api.stop_owned_session(info) is True
     assert all(c["headers"]["X-Avatar-Control-Handle"] == HANDLE for c in session.calls)
+    assert all(c["allow_redirects"] is False for c in session.calls)
 
 
 @pytest.mark.asyncio

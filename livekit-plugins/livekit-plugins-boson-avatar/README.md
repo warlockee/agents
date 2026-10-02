@@ -19,6 +19,8 @@ plus 38 subtests; Ruff passed; mypy passed for all seven plugin source files.
 Coverage includes uncertain create without retry, protocol/URL mismatch, handle
 redaction, pending stop and unreachable stop closing local media while retaining
 cleanup context. Real media and fault acceptance remain separate ops gates.
+HTTP redirects are disabled so a provider redirect cannot forward a control
+handle to another origin; the same 39 tests plus 38 subtests pass with this guard.
 
 Use Boson's Higgs Audio-Driven Avatar as the video output for a LiveKit voice
 agent. This is an Avatar plugin: it composes with your existing voice/LLM
