@@ -1,5 +1,25 @@
 # Boson Higgs Avatar plugin for LiveKit Agents
 
+## Isolated stateless v2 experiment
+
+Branch `codex/boson-avatar-stateless` adds explicit `AvatarSession(stateless=True,
+api_url="https://your-service.example/v2/avatar/livekit", ...)`. Legacy mode stays
+the default/control; this is not an upstream release or production cutover.
+
+V2 creates are one-shot, including timeout/503: there is no idempotency key,
+job-derived replay or old-ID recovery. A new call is new GPU work. The session
+object retains an opaque control handle (excluded from repr), supplies it during
+cleanup, and never falls back to bare-ID deletion. DELETE 202 keeps the handle for
+a later cleanup attempt but closes local media immediately. DELETE 410 closes
+local media without trying to recreate on another GPU. An unreachable backend
+does not count as release proof. Asset listing stays with the asset provider.
+
+Verification checkpoint (2026-10-01 America/Los_Angeles): plugin tests 39 passed
+plus 38 subtests; Ruff passed; mypy passed for all seven plugin source files.
+Coverage includes uncertain create without retry, protocol/URL mismatch, handle
+redaction, pending stop and unreachable stop closing local media while retaining
+cleanup context. Real media and fault acceptance remain separate ops gates.
+
 Use Boson's Higgs Audio-Driven Avatar as the video output for a LiveKit voice
 agent. This is an Avatar plugin: it composes with your existing voice/LLM
 plugin and does not replace or fork it.

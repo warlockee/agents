@@ -59,6 +59,7 @@ class AvatarSession(BaseAvatarSession[Any]):
         avatar_participant_identity: NotGivenOr[str] = NOT_GIVEN,
         avatar_participant_name: NotGivenOr[str] = NOT_GIVEN,
         idempotency_key: NotGivenOr[str] = NOT_GIVEN,
+        stateless: bool = False,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> None:
         """Create a Boson Avatar session.
@@ -80,6 +81,8 @@ class AvatarSession(BaseAvatarSession[Any]):
                 is a UUID derived from the job ID and immutable Avatar session
                 binding, so a redelivered job recovers the provider session.
             conn_options: Timeout and retry options for Boson API requests.
+            stateless: Explicit experimental v2 mode. No create retries, job replay
+                or historical recovery. Requires a /v2/avatar/livekit API URL.
 
         Raises:
             BosonAvatarException: If required configuration is missing or invalid.
@@ -108,7 +111,12 @@ class AvatarSession(BaseAvatarSession[Any]):
         )
         self._avatar_name = _resolve_optional_string(avatar_participant_name, _AVATAR_AGENT_NAME)
         self._idempotency_key = _resolve_optional_idempotency_key(idempotency_key)
-        self._api = BosonAvatarAPI(
+        if stateless and self._idempotency_key is not None:
+            raise BosonAvatarException("Stateless sessions do not support idempotency keys")
+        self._stateless = stateless
+        from .stateless_api import StatelessBosonAvatarAPI
+
+        self._api = (StatelessBosonAvatarAPI if stateless else BosonAvatarAPI)(
             api_key=api_key,
             api_url=api_url,
             conn_options=conn_options,
@@ -192,7 +200,9 @@ class AvatarSession(BaseAvatarSession[Any]):
                         width=self._width,
                         height=self._height,
                         max_duration_seconds=self._max_duration_seconds,
-                        idempotency_key=self._idempotency_key
+                        idempotency_key=None
+                        if self._stateless
+                        else self._idempotency_key
                         or _livekit_job_idempotency_key(
                             livekit_url=livekit_url_value,
                             room_name=room.name,
@@ -321,7 +331,7 @@ class AvatarSession(BaseAvatarSession[Any]):
         session_info = self._session_info
         if session_info is not None:
             try:
-                await self._api.end_session(session_info.id)
+                released = await self._stop_owned(session_info)
             except Exception as exc:  # noqa: BLE001 - a later aclose() can retry by ID
                 logger.warning(
                     "failed to end boson avatar session",
@@ -331,7 +341,7 @@ class AvatarSession(BaseAvatarSession[Any]):
                     },
                 )
             else:
-                if self._session_info is session_info:
+                if released and self._session_info is session_info:
                     self._session_info = None
 
         if not self._closed:
@@ -355,7 +365,7 @@ class AvatarSession(BaseAvatarSession[Any]):
 
     async def _compensate_start(self, session_info: AvatarSessionInfo) -> None:
         try:
-            await self._api.end_session(session_info.id)
+            released = await self._stop_owned(session_info)
         except Exception as exc:  # noqa: BLE001 - startup compensation is best-effort
             logger.warning(
                 "failed to compensate boson avatar session after startup error",
@@ -365,8 +375,16 @@ class AvatarSession(BaseAvatarSession[Any]):
                 },
             )
         else:
-            if self._session_info is session_info:
+            if released and self._session_info is session_info:
                 self._session_info = None
+
+    async def _stop_owned(self, info: AvatarSessionInfo) -> bool:
+        from .stateless_api import StatelessBosonAvatarAPI
+
+        if isinstance(self._api, StatelessBosonAvatarAPI):
+            return await self._api.stop_owned_session(info)
+        await self._api.end_session(info.id)
+        return True
 
     def _on_agent_session_close(self, _: Any) -> None:
         self._close_requested = True

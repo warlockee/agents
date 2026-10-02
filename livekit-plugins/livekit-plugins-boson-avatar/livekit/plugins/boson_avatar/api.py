@@ -18,7 +18,7 @@ import asyncio
 import ipaddress
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -50,6 +50,7 @@ class AvatarSessionInfo:
 
     id: str
     avatar_identity: str
+    control_handle: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
